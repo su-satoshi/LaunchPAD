@@ -55,6 +55,9 @@ export function sourceIcon(source: string): string {
     ziprecruiter: "📋",
     google:       "🔷",
     bulk_import:  "📥",
+    firecrawl:    "🔥",
+    agent_browser:"🧭",
+    reddit:       "👽",
   };
   return map[source] || "💼";
 }

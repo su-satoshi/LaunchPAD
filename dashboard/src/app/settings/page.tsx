@@ -211,6 +211,8 @@ const ALL_SOURCES = [
   { id: "top_companies", label: "Top 100 Companies",  emoji: "🏆" },
   { id: "ziprecruiter",  label: "ZipRecruiter",       emoji: "📋" },
   { id: "google",        label: "Google Jobs",        emoji: "🔷" },
+  { id: "firecrawl",     label: "Firecrawl (web)",    emoji: "🔥" },
+  { id: "agent_browser", label: "Agent Browser",      emoji: "🧭" },
 ];
 
 type Tab = "profile" | "search" | "automation" | "api";
@@ -741,6 +743,46 @@ export default function SettingsPage() {
                 {api?.gmail?.status === "needs_auth" && <GmailConnectButton />}
               </div>
             )}
+          </div>
+
+          {/* Agent stack: self-hosted Firecrawl + Stagehand */}
+          <div className="rounded-3xl p-6" style={CARD}>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                style={{ background: "rgba(249,115,22,0.10)", border: "1px solid rgba(249,115,22,0.22)" }}>
+                <Globe className="w-4 h-4" style={{ color: "#f97316" }} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-white">Agent stack</p>
+                <p className="text-xs" style={{ color: "#666" }}>Self-hosted Firecrawl + Stagehand browser agent · no extra API keys</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {[
+                {
+                  name: "Firecrawl",
+                  detail: String(api?.firecrawl?.url ?? "http://localhost:3002"),
+                  ok: api?.firecrawl?.status === "connected",
+                  bad: "Not running - run `docker compose up -d`",
+                },
+                {
+                  name: "Stagehand browser agent",
+                  detail: `${String(api?.browser_agent?.model ?? "anthropic/claude-sonnet-4-6")} · uses your Chrome`,
+                  ok: Boolean(api?.browser_agent?.stagehand_installed),
+                  bad: "Not installed - run `pip install -r agent/requirements.txt`",
+                },
+              ].map(({ name, detail, ok, bad }) => (
+                <div key={name} className="rounded-2xl p-4" style={{ background: "#1a1a1a", border: "1px solid #222" }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-white">{name}</p>
+                    {ok
+                      ? <span className="flex items-center gap-1 text-[11px] font-bold" style={{ color: "#4ade80" }}><CheckCircle2 className="w-3.5 h-3.5" /> Ready</span>
+                      : <span className="flex items-center gap-1 text-[11px] font-bold" style={{ color: "#f87171" }}><XCircle className="w-3.5 h-3.5" /> Off</span>}
+                  </div>
+                  <p className="text-[11px] mt-1 truncate" style={{ color: "#555" }}>{ok ? detail : bad}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Database */}

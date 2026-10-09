@@ -11,6 +11,9 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Link from "next/link";
+import DetailsForm from "@/components/referrals/DetailsForm";
+import ForumPosts from "@/components/referrals/ForumPosts";
+import { UserCog, MessagesSquare } from "lucide-react";
 
 const REFERRAL_SOURCES = ["linkedin", "glassdoor", "ambitionbox", "indeed"];
 const CARD = { background: "#111111", border: "1px solid #1e1e1e" };
@@ -184,7 +187,7 @@ function ContactModal({
   );
 }
 
-export default function ReferralsPage() {
+function RequestReferrals() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState<DraftState | null>(null);
@@ -235,26 +238,7 @@ export default function ReferralsPage() {
   };
 
   return (
-    <div className="min-h-screen p-6 space-y-5" style={{ background: "#080808" }}>
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Referrals</h1>
-          <p className="text-xs mt-0.5 font-medium" style={{ color: "#666" }}>
-            Find people at target companies and request a referral via email
-          </p>
-        </div>
-        <Link
-          href="/jobs"
-          className="flex items-center gap-2 text-sm px-4 py-2 rounded-2xl transition"
-          style={{ color: "#888", border: "1px solid #2a2a2a" }}
-          onMouseEnter={e => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.background = "#1a1a1a"; }}
-          onMouseLeave={e => { e.currentTarget.style.color = "#888"; e.currentTarget.style.background = ""; }}
-        >
-          <Briefcase className="w-4 h-4" /> All Jobs
-        </Link>
-      </div>
+    <div className="space-y-5">
 
       {/* Info banner */}
       <div className="flex items-start gap-4 px-5 py-4 rounded-2xl"
@@ -409,6 +393,56 @@ export default function ReferralsPage() {
       {draft && (
         <ContactModal draft={draft} onClose={() => setDraft(null)} onSend={handleSend} />
       )}
+    </div>
+  );
+}
+
+type ReferralTab = "request" | "details" | "forums";
+
+const TABS: { id: ReferralTab; label: string; icon: typeof Users; hint: string }[] = [
+  { id: "request", label: "Request referrals", icon: Mail, hint: "Email people at companies you've matched with" },
+  { id: "details", label: "My details", icon: UserCog, hint: "What the agent says about you in posts" },
+  { id: "forums", label: "Forum posts", icon: MessagesSquare, hint: "Reddit, LinkedIn and Glassdoor drafts to approve" },
+];
+
+export default function ReferralsPage() {
+  const [tab, setTab] = useState<ReferralTab>("request");
+  const active = TABS.find((t) => t.id === tab)!;
+
+  return (
+    <div className="min-h-screen p-6 space-y-5" style={{ background: "#080808" }}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Referrals</h1>
+          <p className="text-xs mt-0.5 font-medium" style={{ color: "#666" }}>{active.hint}</p>
+        </div>
+        <Link
+          href="/jobs"
+          className="flex items-center gap-2 text-sm px-4 py-2 rounded-2xl transition"
+          style={{ color: "#888", border: "1px solid #2a2a2a" }}
+        >
+          <Briefcase className="w-4 h-4" /> All Jobs
+        </Link>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b" style={{ borderColor: "#1e1e1e" }} role="tablist">
+        {TABS.map(({ id, label, icon: Icon }) => {
+          const on = tab === id;
+          return (
+            <button key={id} type="button" role="tab" aria-selected={on} onClick={() => setTab(id)}
+              className="flex items-center gap-2 px-4 py-3 text-sm font-semibold transition -mb-px"
+              style={{ color: on ? "#fff" : "#666", borderBottom: `2px solid ${on ? "#f97316" : "transparent"}` }}>
+              <Icon className="w-4 h-4" style={{ color: on ? "#f97316" : undefined }} /> {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === "request" && <RequestReferrals />}
+      {tab === "details" && <DetailsForm />}
+      {tab === "forums" && <ForumPosts />}
     </div>
   );
 }

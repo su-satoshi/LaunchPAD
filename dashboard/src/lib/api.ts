@@ -77,3 +77,24 @@ export const autoApplyJob = (jobId: number) =>
 export const verifyLinks = () =>
   api.post("/jobs/verify-links").then((r) => r.data);
 
+
+// Referrals: details, forum discovery, drafted posts
+export const getReferralProfile = () => api.get("/referrals/profile").then((r) => r.data);
+export const updateReferralProfile = (data: Record<string, unknown>) =>
+  api.put("/referrals/profile", data).then((r) => r.data);
+export const resetReferralProfileToResume = () =>
+  api.post("/referrals/profile/use-resume").then((r) => r.data);
+export const getReferralPlatforms = () => api.get("/referrals/platforms").then((r) => r.data);
+export const openPlatformLogin = (platform: string) =>
+  api.post(`/referrals/login/${platform}`).then((r) => r.data);
+export const finishPlatformLogin = () => api.post("/referrals/login-done").then((r) => r.data);
+export const discoverReferralThreads = (platforms?: string[]) =>
+  api.post("/referrals/discover", { platforms }).then((r) => r.data);
+export const composeOpenToWork = (platforms?: string[]) =>
+  api.post("/referrals/compose", { platforms }).then((r) => r.data);
+export const getForumPosts = (status?: string) =>
+  api.get("/referrals/posts", { params: { status } }).then((r) => r.data);
+export const updateForumPost = (id: number, data: Record<string, unknown>) =>
+  api.patch(`/referrals/posts/${id}`, data).then((r) => r.data);
+export const approveForumPost = (id: number) =>
+  api.post(`/referrals/posts/${id}/approve`).then((r) => r.data);
