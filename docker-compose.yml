@@ -1,0 +1,137 @@
+# Orion AI - self-hosted scraping stack
+#
+# One command starts everything the agent needs to search and scrape without
+# any third-party API keys:
+#
+#   docker compose up -d
+#
+#   firecrawl-api       -> http://localhost:3002   (Firecrawl, self-hosted)
+#   searxng             -> internal search engine Firecrawl's /search uses
+#   playwright-service  -> headless browser Firecrawl renders JS pages with
+#   redis / rabbitmq / nuq-postgres -> Firecrawl's queue + state
+#
+# Firecrawl is built straight from its source at a pinned release tag, so
+# nothing is pulled from a hosted Firecrawl account. Bump FIRECRAWL_REF to
+# upgrade.
+#
+# The Stagehand browser agent is NOT in here on purpose: it runs inside the
+# Python backend on your machine, using your own Chrome profile, so it can
+# use sites you are signed in to (LinkedIn, Reddit, Glassdoor).
+
+name: orion
+
+
+x-logging: &logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  firecrawl-api:
+    build:
+      context: https://github.com/firecrawl/firecrawl.git#${FIRECRAWL_REF:-v2.11.498}:apps/api
+    environment:
+      HOST: "0.0.0.0"
+      PORT: 3002
+      EXTRACT_WORKER_PORT: 3004
+      WORKER_PORT: 3005
+      ENV: local
+      USE_DB_AUTHENTICATION: "false"
+      REDIS_URL: redis://redis:6379
+      REDIS_RATE_LIMIT_URL: redis://redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://playwright-service:3000/scrape
+      NUQ_RABBITMQ_URL: amqp://rabbitmq:5672
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_HOST: nuq-postgres
+      POSTGRES_PORT: 5432
+      SEARXNG_ENDPOINT: http://searxng:8080
+      SEARXNG_ENGINES: ${SEARXNG_ENGINES:-google,bing,duckduckgo,brave}
+      NUM_WORKERS_PER_QUEUE: ${FIRECRAWL_WORKERS:-4}
+      CRAWL_CONCURRENT_REQUESTS: 5
+      MAX_CONCURRENT_JOBS: 3
+      BROWSER_POOL_SIZE: 3
+      HARNESS_STARTUP_TIMEOUT_MS: 120000
+      LOGGING_LEVEL: ${FIRECRAWL_LOG_LEVEL:-info}
+    command: node dist/src/harness.js --start-docker
+    ports:
+      - "127.0.0.1:${FIRECRAWL_PORT:-3002}:3002"
+    depends_on:
+      redis:
+        condition: service_started
+      playwright-service:
+        condition: service_started
+      searxng:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      nuq-postgres:
+        condition: service_healthy
+    ulimits:
+      nofile: { soft: 65535, hard: 65535 }
+    mem_limit: 4G
+    restart: unless-stopped
+    logging: *logging
+
+  playwright-service:
+    build:
+      context: https://github.com/firecrawl/firecrawl.git#${FIRECRAWL_REF:-v2.11.498}:apps/playwright-service-ts
+    environment:
+      PORT: 3000
+      BLOCK_MEDIA: "true"
+      MAX_CONCURRENT_PAGES: 5
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2G
+    tmpfs:
+      - /tmp/.cache:noexec,nosuid,size=1g
+    restart: unless-stopped
+    logging: *logging
+
+  nuq-postgres:
+    build:
+      context: https://github.com/firecrawl/firecrawl.git#${FIRECRAWL_REF:-v2.11.498}:apps/nuq-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - nuq-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --bind 0.0.0.0
+    restart: unless-stopped
+    logging: *logging
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    logging: *logging
+
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  nuq-data:

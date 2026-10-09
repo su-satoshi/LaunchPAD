@@ -1,0 +1,18 @@
+# Minimal SearXNG config for Firecrawl's /search endpoint.
+# JSON output must be enabled or Firecrawl can't read results.
+use_default_settings: true
+
+general:
+  instance_name: "orion-search"
+
+server:
+  # Only reachable inside the docker network, but still change this.
+  secret_key: "change-me-orion-local-only"
+  limiter: false
+  image_proxy: false
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json

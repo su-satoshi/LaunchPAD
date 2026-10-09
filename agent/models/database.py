@@ -177,6 +177,65 @@ class SearchRun(Base):
     status = Column(String, default="running")  # running, completed, failed
 
 
+class ReferralProfile(Base):
+    """
+    Details the referral agent uses in forum posts. Any field left empty is
+    filled from the parsed resume (UserProfile) and job preferences.
+    """
+    __tablename__ = "referral_profile"
+
+    id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String)
+    headline = Column(String)                 # "Cybersecurity grad, SOC / blue team"
+    email = Column(String)
+    phone = Column(String)
+    location = Column(String)
+    linkedin_url = Column(String)
+    github_url = Column(String)
+    portfolio_url = Column(String)
+    target_roles = Column(JSON, default=lambda: [])
+    target_companies = Column(JSON, default=lambda: [])
+    skills = Column(JSON, default=lambda: [])
+    years_experience = Column(Integer)
+    work_rights = Column(String)
+    availability = Column(String)             # "Immediately", "From Dec 2026"
+    pitch = Column(Text)                      # 2-3 sentence intro in your words
+    # privacy: what the agent may put in public posts
+    share_email = Column(Boolean, default=False)
+    share_phone = Column(Boolean, default=False)
+    share_linkedin = Column(Boolean, default=True)
+    # where + how
+    platforms = Column(JSON, default=lambda: ["reddit", "linkedin", "glassdoor"])
+    subreddits = Column(JSON, default=lambda: ["forhire", "cscareerquestionsOCE", "auscorp"])
+    auto_discover = Column(Boolean, default=True)   # find threads during each search run
+    max_posts_per_day = Column(Integer, default=5)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ForumPost(Base):
+    """A drafted forum post or reply. Nothing is posted until you approve it."""
+    __tablename__ = "forum_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    external_id = Column(String, unique=True, index=True)   # platform+thread+kind
+    platform = Column(String, nullable=False)                # reddit, linkedin, glassdoor
+    kind = Column(String, nullable=False)                    # open_to_work, reply_hiring, reply_referral
+    target = Column(String)                                  # subreddit / community for new posts
+    thread_url = Column(String)
+    thread_title = Column(String)
+    thread_author = Column(String)
+    thread_snippet = Column(Text)
+    relevance = Column(Float)
+    title = Column(String)
+    body = Column(Text, nullable=False)
+    status = Column(String, default="draft")  # draft, approved, posting, posted, failed, dismissed
+    error_message = Column(Text)
+    posted_url = Column(String)
+    found_via = Column(String)                # firecrawl, agent_browser
+    created_at = Column(DateTime, default=datetime.utcnow)
+    posted_at = Column(DateTime)
+
+
 def get_db():
     db = SessionLocal()
     try:

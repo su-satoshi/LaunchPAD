@@ -384,6 +384,10 @@ async def run_search_cycle(db: Optional[Session] = None) -> dict:
             # ── 5. Verify new job links in background ────────────────────────
             asyncio.create_task(_verify_new_links())
 
+            # ── 6. Referral agent: find hiring/referral threads, draft replies ─
+            #      (drafts only - nothing is posted until you approve it)
+            asyncio.create_task(_auto_referral_discovery())
+
             return stats
 
         except Exception as e:
@@ -445,6 +449,23 @@ async def _verify_new_links():
         db.rollback()
     finally:
         db.close()
+
+
+async def _auto_referral_discovery():
+    try:
+        from agent.models.database import ReferralProfile
+        db = SessionLocal()
+        try:
+            rp = db.query(ReferralProfile).first()
+            enabled = bool(rp and rp.auto_discover)
+        finally:
+            db.close()
+        if enabled:
+            from agent.referrals.agent import discover_threads
+            result = await discover_threads()
+            logger.info(f"Referral discovery: {result}")
+    except Exception as e:
+        logger.warning(f"Referral discovery failed: {e}")
 
 
 async def _scheduled_search():

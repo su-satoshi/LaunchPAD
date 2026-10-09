@@ -193,11 +193,12 @@ def _prefs_dict(p: JobPreferences) -> dict:
 
 
 @router.get("/api-status")
-def get_api_status(db: Session = Depends(get_db)):
+async def get_api_status(db: Session = Depends(get_db)):
     """Return status and estimated usage for all connected APIs."""
     import os
     from pathlib import Path
     from agent.models.database import Job, Email
+    from agent.tools import firecrawl_client, browser_agent
 
     # Claude API
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
@@ -254,6 +255,12 @@ def get_api_status(db: Session = Depends(get_db)):
             "total_jobs":   total_jobs,
             "total_emails": total_emails,
         },
+        "firecrawl": {
+            "status": "connected" if await firecrawl_client.is_available(force=True) else "not_running",
+            "url":    firecrawl_client.FIRECRAWL_URL,
+            "self_hosted": True,
+        },
+        "browser_agent": await browser_agent.status(),
     }
 
 

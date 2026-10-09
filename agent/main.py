@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.models.database import init_db
-from agent.routers import jobs, emails, settings, applications
+from agent.routers import jobs, emails, settings, applications, referrals
 from agent.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -60,6 +60,7 @@ app.include_router(jobs.router, prefix="/api")
 app.include_router(emails.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(applications.router, prefix="/api")
+app.include_router(referrals.router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -1,7 +1,8 @@
 """
 Multi-source job scraper.
 Uses jobspy for LinkedIn/Indeed/Glassdoor/ZipRecruiter/Google,
-plus custom scrapers for web3.careers, prosple, ambitionbox, seek, and top-100 company sites.
+custom scrapers for web3.careers, prosple, ambitionbox, seek and top company sites,
+and agent sources (self-hosted Firecrawl + Stagehand browser agent) in agent_sources.py.
 """
 import asyncio
 import hashlib
@@ -507,6 +508,14 @@ async def run_all_scrapers(
         tasks.append(scrape_prosple(titles, locations))
     if "ambitionbox" in sources:
         tasks.append(scrape_ambitionbox_referrals(titles, locations))
+
+    # Agent sources: self-hosted Firecrawl + Stagehand browser agent
+    if "firecrawl" in sources:
+        from agent.scrapers.agent_sources import firecrawl_job_search
+        tasks.append(firecrawl_job_search(titles, locations, keywords))
+    if "agent_browser" in sources:
+        from agent.scrapers.agent_sources import agent_browser_job_search
+        tasks.append(agent_browser_job_search(titles, locations))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for r in results:
