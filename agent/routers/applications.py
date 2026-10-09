@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
-from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import desc, func
+from sqlalchemy.orm import Session
+
+from agent.utils import utcnow
 
 from agent.models.database import get_db, Application, Job, ApplicationStatus, SearchRun
 
@@ -11,16 +14,16 @@ router = APIRouter(prefix="/applications", tags=["applications"])
 
 
 class ApplicationUpdate(BaseModel):
-    status: Optional[str] = None
-    notes: Optional[str] = None
+    status: Optional[ApplicationStatus] = None
+    notes: Optional[str] = Field(None, max_length=20_000)
     follow_up_at: Optional[datetime] = None
 
 
 @router.get("")
 def list_applications(
     status: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
     q = db.query(Application).join(Job)
@@ -57,17 +60,16 @@ def update_application(app_id: int, data: ApplicationUpdate, db: Session = Depen
         app.notes = data.notes
     if data.follow_up_at is not None:
         app.follow_up_at = data.follow_up_at
-    app.updated_at = datetime.utcnow()
+    app.updated_at = utcnow()
     db.commit()
     return _app_dict(app)
 
 
 @router.get("/stats/pipeline")
 def pipeline_stats(db: Session = Depends(get_db)):
-    stages = [s.value for s in ApplicationStatus]
-    result = {}
-    for stage in stages:
-        result[stage] = db.query(Application).filter(Application.status == stage).count()
+    # One GROUP BY instead of a COUNT query per stage
+    counts = dict(db.query(Application.status, func.count(Application.id)).group_by(Application.status).all())
+    result = {s.value: counts.get(s, 0) for s in ApplicationStatus}
 
     recent_runs = db.query(SearchRun).order_by(desc(SearchRun.started_at)).limit(5).all()
     return {

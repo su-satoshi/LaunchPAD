@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from agent.models.database import get_db, ForumPost
@@ -16,13 +16,7 @@ from agent.referrals import agent as ref
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/referrals", tags=["referrals"])
 
-_bg_tasks: set[asyncio.Task] = set()
-
-
-def _spawn(coro) -> None:
-    t = asyncio.create_task(coro)
-    _bg_tasks.add(t)
-    t.add_done_callback(_bg_tasks.discard)
+from agent.utils import spawn as _spawn
 
 
 # ── Details form ─────────────────────────────────────────────────────────────
@@ -138,10 +132,10 @@ async def compose(req: ComposeRequest, db: Session = Depends(get_db)):
     try:
         posts = await asyncio.to_thread(ref.compose_open_to_work, db, req.platforms)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     except Exception as e:
         logger.error(f"Compose failed: {e}")
-        raise HTTPException(502, f"Drafting failed - check your Claude API key ({type(e).__name__})")
+        raise HTTPException(502, f"Drafting failed - check your Claude API key ({type(e).__name__})") from e
     return {"created": [_post_dict(p) for p in posts]}
 
 
@@ -154,13 +148,11 @@ def list_posts(status: Optional[str] = None, platform: Optional[str] = None,
     if status:
         q = q.filter(ForumPost.status.in_(status.split(",")))
     else:
-        q = q.filter(ForumPost.status != "dismissed")
+        q = q.filter(ForumPost.status.notin_(["dismissed", "expired"]))
     if platform:
         q = q.filter(ForumPost.platform == platform)
     posts = q.order_by(desc(ForumPost.created_at)).limit(200).all()
-    counts = {}
-    for (st,) in db.query(ForumPost.status).all():
-        counts[st] = counts.get(st, 0) + 1
+    counts = dict(db.query(ForumPost.status, func.count(ForumPost.id)).group_by(ForumPost.status).all())
     return {"posts": [_post_dict(p) for p in posts], "counts": counts}
 
 
@@ -173,11 +165,11 @@ class PostUpdate(BaseModel):
 
 @router.patch("/posts/{post_id}")
 def update_post(post_id: int, data: PostUpdate, db: Session = Depends(get_db)):
-    post = db.query(ForumPost).get(post_id)
+    post = db.get(ForumPost, post_id)
     if not post:
         raise HTTPException(404, "Post not found")
-    if post.status in ("posting", "posted"):
-        raise HTTPException(400, "This post has already gone out")
+    if post.status in ("approved", "posting", "posted"):
+        raise HTTPException(400, "This post is already going out")
     upd = data.model_dump(exclude_unset=True)
     if "status" in upd and upd["status"] not in ("dismissed", "draft"):
         raise HTTPException(400, "Use /approve to post")
@@ -190,7 +182,7 @@ def update_post(post_id: int, data: PostUpdate, db: Session = Depends(get_db)):
 @router.post("/posts/{post_id}/approve")
 async def approve_post(post_id: int, db: Session = Depends(get_db)):
     """You approved this draft: the browser agent posts it from your signed-in profile."""
-    post = db.query(ForumPost).get(post_id)
+    post = db.get(ForumPost, post_id)
     if not post:
         raise HTTPException(404, "Post not found")
     if post.status in ("posting", "posted"):

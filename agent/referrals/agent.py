@@ -21,9 +21,9 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus
 
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -32,6 +32,7 @@ from agent.models.database import (
     SessionLocal, ForumPost, ReferralProfile, UserProfile, JobPreferences,
 )
 from agent.tools import firecrawl_client
+from agent.utils import UNTRUSTED_NOTE, host_matches, parse_llm_json, safe_http_url, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -169,10 +170,7 @@ def _claude_json(prompt: str, max_tokens: int = 3000):
     from agent.ai.claude_agent import client, MODEL
     resp = client.messages.create(model=MODEL, max_tokens=max_tokens,
                                   messages=[{"role": "user", "content": prompt}])
-    raw = resp.content[0].text.strip()
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
-    return json.loads(raw)
+    return parse_llm_json(resp.content[0].text)
 
 
 def _draft_open_to_work(profile: dict, platform: str, target: Optional[str]) -> dict:
@@ -214,6 +212,8 @@ For each post decide:
 Candidate profile (JSON):
 {json.dumps(profile, default=str, indent=1)}
 
+{UNTRUSTED_NOTE}
+
 POSTS:
 {listing}
 
@@ -249,7 +249,7 @@ def _queries(profile: dict) -> list[str]:
 
 
 def _ext_id(platform: str, url: str, kind: str) -> str:
-    return hashlib.md5(f"{platform}|{url.split('?')[0].rstrip('/')}|{kind}".encode()).hexdigest()
+    return hashlib.md5(f"{platform}|{url.split('?')[0].rstrip('/')}|{kind}".encode(), usedforsecurity=False).hexdigest()
 
 
 async def _firecrawl_candidates(platform: str, queries: list[str]) -> list[dict]:
@@ -259,8 +259,7 @@ async def _firecrawl_candidates(platform: str, queries: list[str]) -> list[dict]
     out = []
     for q in queries[:4]:
         for r in await firecrawl_client.search(q, limit=6, scrape=True, include_domains=domains):
-            host = urlparse(r["url"]).netloc
-            if not any(d in host for d in domains):
+            if not host_matches(r["url"], domains) or not safe_http_url(r["url"]):
                 continue
             out.append({"platform": platform, "url": r["url"], "title": r["title"],
                         "author": "", "snippet": (r["markdown"] or r["description"])[:1500],
@@ -290,7 +289,7 @@ async def _browser_candidates(platforms: list[str], queries: list[str]) -> list[
                         logger.warning(f"Browser discovery failed on {platform}: {e}")
                         continue
                     for t in (res.posts if res else [])[:10]:
-                        if t.url.startswith("http"):
+                        if safe_http_url(t.url):
                             out.append({"platform": platform, "url": t.url, "title": t.title,
                                         "author": t.author, "snippet": t.snippet,
                                         "found_via": "agent_browser"})
@@ -359,7 +358,7 @@ async def discover_threads(platforms: Optional[list[str]] = None, use_browser: b
                         db.rollback()
             result = {"candidates": len(candidates), "new": len(uniq), "drafted": drafted,
                       "platforms": platforms}
-            _discover_state.update(last_run=datetime.utcnow().isoformat(), last_result=result)
+            _discover_state.update(last_run=utcnow().isoformat(), last_result=result)
             return result
         finally:
             db.close()
@@ -377,7 +376,7 @@ def compose_open_to_work(db: Session, platforms: Optional[list[str]] = None) -> 
         for t in targets:
             draft = _draft_open_to_work(profile, p, t)
             post = ForumPost(
-                external_id=_ext_id(p, f"new:{t or ''}:{datetime.utcnow().isoformat()}", "open_to_work"),
+                external_id=_ext_id(p, f"new:{t or ''}:{utcnow().isoformat()}", "open_to_work"),
                 platform=p, kind="open_to_work", target=t,
                 title=(draft.get("title") or "")[:300], body=draft.get("body") or "",
             )
@@ -396,7 +395,7 @@ class _SignedIn(BaseModel):
 
 
 def posted_today(db: Session, platform: str) -> int:
-    since = datetime.utcnow() - timedelta(days=1)
+    since = utcnow() - timedelta(days=1)
     return db.query(ForumPost).filter(ForumPost.platform == platform, ForumPost.status == "posted",
                                       ForumPost.posted_at >= since).count()
 
@@ -414,7 +413,7 @@ def _old_reddit(url: str) -> str:
 async def publish_post(post_id: int) -> None:
     from agent.tools.browser_agent import BrowserAgent, POST_HEADLESS
     db = SessionLocal()
-    post = db.query(ForumPost).get(post_id)
+    post = db.get(ForumPost, post_id)
     if not post:
         db.close()
         return
@@ -425,7 +424,7 @@ async def publish_post(post_id: int) -> None:
             ok = await _publish(agent, post)
         post.status = "posted" if ok else "failed"
         if ok:
-            post.posted_at = datetime.utcnow()
+            post.posted_at = utcnow()
         else:
             post.error_message = post.error_message or "Couldn't confirm the post went through - check the site"
     except Exception as e:

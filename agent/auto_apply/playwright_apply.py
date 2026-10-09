@@ -23,9 +23,10 @@ import asyncio
 import base64
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Optional
+
+from agent.utils import host_matches
 
 logger = logging.getLogger(__name__)
 
@@ -41,23 +42,38 @@ def _creds(portal: str) -> tuple[str, str]:
     return email, password
 
 
+# Portal -> domains it legitimately lives on. Matching is on the parsed hostname
+# (exact or subdomain), never a substring of the whole URL: a scraped link like
+# https://evil.example/seek.com.au/login must not be treated as Seek.
+PORTAL_DOMAINS: dict[str, tuple[str, ...]] = {
+    "linkedin":        ("linkedin.com",),
+    "seek":            ("seek.com.au", "seek.co.nz"),
+    "indeed":          ("indeed.com",),
+    "greenhouse":      ("greenhouse.io",),
+    "lever":           ("lever.co",),
+    "workable":        ("workable.com",),
+    "microsoft":       ("jobs.microsoft.com", "careers.microsoft.com"),
+    "smartrecruiters": ("smartrecruiters.com",),
+}
+
+
 def _detect_portal(url: str) -> str:
-    u = url.lower()
-    if "linkedin.com" in u:        return "linkedin"
-    if "seek.com.au" in u:         return "seek"
-    if "indeed.com" in u:          return "indeed"
-    if "greenhouse.io" in u:       return "greenhouse"
-    if "lever.co" in u:            return "lever"
-    if "workable.com" in u:        return "workable"
-    if "jobs.microsoft.com" in u or "careers.microsoft.com" in u:  return "microsoft"
-    if "smartrecruiters.com" in u: return "smartrecruiters"
+    for portal, domains in PORTAL_DOMAINS.items():
+        if host_matches(url, domains):
+            return portal
+    # indeed has country subdomains (au.indeed.com); covered by host_matches above
     return "generic"
+
+
+def _on_portal(page_url: str, portal: str) -> bool:
+    """Only ever type a portal password into that portal's own domain."""
+    return host_matches(page_url, PORTAL_DOMAINS.get(portal, ()))
 
 
 # ─── Session store (in-memory cache for browser contexts) ─────────────────────
 
 _STORAGE_DIR = Path(__file__).parent / ".sessions"
-_STORAGE_DIR.mkdir(exist_ok=True)
+_STORAGE_DIR.mkdir(exist_ok=True, mode=0o700)
 
 
 def _session_path(portal: str) -> Path:
@@ -80,7 +96,7 @@ async def auto_apply_to_job(job: dict, profile) -> dict:
       }
     """
     try:
-        from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+        from playwright.async_api import async_playwright
     except ImportError:
         return {
             "success": False,
@@ -128,6 +144,10 @@ async def auto_apply_to_job(job: dict, profile) -> dict:
 
             # Save session (preserves cookies/localStorage for next run)
             await context.storage_state(path=str(session))
+            try:
+                os.chmod(session, 0o600)   # saved cookies = a signed-in session
+            except OSError:
+                pass
 
             # Take final screenshot
             screenshot = await page.screenshot(full_page=False)
@@ -191,6 +211,8 @@ async def _apply_linkedin(page, url: str, job: dict, profile) -> dict:
             return _needs_login("linkedin", "Set LINKEDIN_EMAIL and LINKEDIN_PASSWORD in your .env file")
         # Login flow
         await page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
+        if not _on_portal(page.url, "linkedin"):
+            return _needs_review("linkedin", "Sign-in page isn't on linkedin.com - not entering your password")
         await page.fill("#username", email);  fields_filled.append("email")
         await page.fill("#password", password); fields_filled.append("password")
         await page.click('[type="submit"]')
@@ -266,6 +288,8 @@ async def _apply_seek(page, url: str, job: dict, profile) -> dict:
     if "login" in page.url or "signin" in page.url:
         if not email or not password:
             return _needs_login("seek", "Set SEEK_EMAIL and SEEK_PASSWORD in your .env file")
+        if not _on_portal(page.url, "seek"):
+            return _needs_review("seek", "Sign-in page isn't on seek.com.au - not entering your password")
         email_inp = await page.query_selector("input[type='email'], input[name='email']")
         pass_inp  = await page.query_selector("input[type='password']")
         if email_inp:
@@ -318,6 +342,8 @@ async def _apply_indeed(page, url: str, job: dict, profile) -> dict:
     if "accounts.indeed.com" in page.url or "login" in page.url:
         if not email or not password:
             return _needs_login("indeed", "Set INDEED_EMAIL and INDEED_PASSWORD in your .env file")
+        if not _on_portal(page.url, "indeed"):
+            return _needs_review("indeed", "Sign-in page isn't on indeed.com - not entering your password")
         email_inp = await page.query_selector("input[type='email'], #ifl-InputFormField-3")
         if email_inp:
             await email_inp.fill(email); fields_filled.append("email")

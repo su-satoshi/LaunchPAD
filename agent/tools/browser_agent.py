@@ -18,11 +18,12 @@ import asyncio
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Optional, Type, TypeVar
 
 from pydantic import BaseModel
+
+from agent.utils import UNTRUSTED_NOTE, parse_llm_json, safe_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -173,10 +174,10 @@ class BrowserAgent:
         return self.mode == "stagehand"
 
     async def goto(self, url: str, timeout_ms: int = 45_000) -> None:
-        if self.mode == "stagehand":
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-        else:
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        # Never let scraped data steer the signed-in browser to javascript:/file:/data: URLs
+        if not safe_http_url(url):
+            raise BrowserAgentError(f"Refusing to open non-http(s) URL: {url[:80]!r}")
+        await self.page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
         await asyncio.sleep(2.0)  # let client-side apps render
 
     async def current_url(self) -> str:
@@ -254,15 +255,12 @@ def _claude_extract(instruction: str, page_text: str, schema: Type[T]) -> Option
     from agent.ai.claude_agent import client, MODEL
     prompt = (
         f"{instruction}\n\nReturn ONLY JSON matching this JSON schema (no markdown):\n"
-        f"{json.dumps(schema.model_json_schema())}\n\nPAGE TEXT:\n{page_text}"
+        f"{json.dumps(schema.model_json_schema())}\n{UNTRUSTED_NOTE}\n\nPAGE TEXT:\n{page_text}"
     )
     try:
         resp = client.messages.create(model=MODEL, max_tokens=4096,
                                       messages=[{"role": "user", "content": prompt}])
-        raw = resp.content[0].text.strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-        return schema.model_validate_json(raw)
+        return schema.model_validate(parse_llm_json(resp.content[0].text))
     except Exception as e:
         logger.warning(f"Claude fallback extract failed: {e}")
         return None

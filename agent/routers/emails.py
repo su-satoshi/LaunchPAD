@@ -1,38 +1,48 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
+import asyncio
+import re
 from typing import Optional
-from datetime import datetime
-from pydantic import BaseModel
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
 from agent.models.database import get_db, Email, Job, Application, ApplicationStatus, UserProfile
 from agent.ai.claude_agent import draft_application_email
 from agent.gmail_service.gmail_service import send_email
+from agent.utils import utcnow
+
+_EMAIL_RE = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
+EMAIL_TYPES = {"application", "referral_request", "follow_up", "cold_email"}
+
+
+def _valid_address(addr: Optional[str]) -> bool:
+    return bool(addr) and len(addr) <= 320 and bool(_EMAIL_RE.match(addr.strip()))
 
 router = APIRouter(prefix="/emails", tags=["emails"])
 
 
 class SendEmailRequest(BaseModel):
-    to_address: Optional[str] = None
-    to_name: Optional[str] = None
-    subject: Optional[str] = None
-    body: Optional[str] = None
+    to_address: Optional[str] = Field(None, max_length=320)
+    to_name: Optional[str] = Field(None, max_length=200)
+    subject: Optional[str] = Field(None, max_length=500)
+    body: Optional[str] = Field(None, max_length=50_000)
 
 
 class DraftEmailRequest(BaseModel):
     job_id: int
     email_type: str = "application"
-    recipient_name: Optional[str] = None
-    to_address: Optional[str] = None
-    additional_context: Optional[str] = None
+    recipient_name: Optional[str] = Field(None, max_length=200)
+    to_address: Optional[str] = Field(None, max_length=320)
+    additional_context: Optional[str] = Field(None, max_length=5000)
 
 
 @router.get("")
 def list_emails(
     status: Optional[str] = None,
     email_type: Optional[str] = None,
-    page: int = 1,
-    limit: int = 20,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
     q = db.query(Email)
@@ -63,8 +73,10 @@ def update_email(email_id: int, data: SendEmailRequest, db: Session = Depends(ge
     email = db.query(Email).filter(Email.id == email_id).first()
     if not email:
         raise HTTPException(404, "Email not found")
-    if email.status == "sent":
-        raise HTTPException(400, "Cannot edit sent email")
+    if email.status in ("sent", "sending"):
+        raise HTTPException(400, "Cannot edit a sent email")
+    if data.to_address and not _valid_address(data.to_address):
+        raise HTTPException(400, "That doesn't look like a valid email address")
     if data.to_address is not None:
         email.to_address = data.to_address
     if data.to_name is not None:
@@ -82,17 +94,24 @@ def send_draft(email_id: int, overrides: Optional[SendEmailRequest] = None, db: 
     email = db.query(Email).filter(Email.id == email_id).first()
     if not email:
         raise HTTPException(404, "Email not found")
-    if email.status == "sent":
+    if email.status in ("sent", "sending"):
         raise HTTPException(400, "Email already sent")
 
     profile = db.query(UserProfile).first()
-    to_address = (overrides.to_address if overrides else None) or email.to_address
-    if not to_address:
-        raise HTTPException(400, "No recipient email address set")
+    to_address = ((overrides.to_address if overrides else None) or email.to_address or "").strip()
+    if not _valid_address(to_address):
+        raise HTTPException(400, "Set a valid recipient email address first")
 
     subject = (overrides.subject if overrides else None) or email.subject
     body = (overrides.body if overrides else None) or email.body
     to_name = (overrides.to_name if overrides else None) or email.to_name
+
+    # Claim the email before calling Gmail so a double-click can't send it twice
+    claimed = db.query(Email).filter(Email.id == email_id, Email.status.notin_(["sent", "sending"])) \
+        .update({"status": "sending"}, synchronize_session=False)
+    db.commit()
+    if not claimed:
+        raise HTTPException(409, "This email is already being sent")
 
     try:
         result = send_email(
@@ -102,34 +121,41 @@ def send_draft(email_id: int, overrides: Optional[SendEmailRequest] = None, db: 
             to_name=to_name,
             from_name=profile.name if profile else None,
         )
-        email.status = "sent"
-        email.sent_at = datetime.utcnow()
-        email.gmail_message_id = result.get("message_id")
-        email.gmail_thread_id = result.get("thread_id")
-        email.to_address = to_address
-
-        if email.job_id:
-            job = db.query(Job).filter(Job.id == email.job_id).first()
-            if job:
-                job.status = ApplicationStatus.email_sent
-                app = db.query(Application).filter(Application.job_id == job.id).first()
-                if not app:
-                    app = Application(job_id=job.id, status=ApplicationStatus.email_sent, applied_at=datetime.utcnow())
-                    db.add(app)
-                else:
-                    app.status = ApplicationStatus.email_sent
-                    app.applied_at = datetime.utcnow()
-
-        db.commit()
-        return {"ok": True, "message_id": result.get("message_id")}
     except Exception as e:
-        email.error_message = str(e)
+        db.refresh(email)
+        email.status = "draft"
+        email.error_message = str(e)[:1000]
         db.commit()
-        raise HTTPException(500, f"Send failed: {e}")
+        raise HTTPException(502, f"Send failed: {e}") from e
+
+    db.refresh(email)
+    now = utcnow()
+    email.status = "sent"
+    email.sent_at = now
+    email.error_message = None
+    email.gmail_message_id = result.get("message_id")
+    email.gmail_thread_id = result.get("thread_id")
+    email.to_address = to_address
+    email.subject, email.body, email.to_name = subject, body, to_name
+
+    if email.job_id:
+        job = db.query(Job).filter(Job.id == email.job_id).first()
+        if job:
+            job.status = ApplicationStatus.email_sent
+            app = db.query(Application).filter(Application.job_id == job.id).first()
+            if not app:
+                db.add(Application(job_id=job.id, status=ApplicationStatus.email_sent, applied_at=now))
+            else:
+                app.status = ApplicationStatus.email_sent
+                app.applied_at = now
+    db.commit()
+    return {"ok": True, "message_id": result.get("message_id")}
 
 
 @router.post("/draft")
 async def create_draft_email(req: DraftEmailRequest, db: Session = Depends(get_db)):
+    if req.email_type not in EMAIL_TYPES:
+        raise HTTPException(400, f"email_type must be one of {sorted(EMAIL_TYPES)}")
     job = db.query(Job).filter(Job.id == req.job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
@@ -147,7 +173,6 @@ async def create_draft_email(req: DraftEmailRequest, db: Session = Depends(get_d
         "title": job.title, "company": job.company, "location": job.location,
         "url": job.url, "description": job.description,
     }
-    import asyncio
     email_data = await asyncio.to_thread(
         draft_application_email,
         job=job_dict,
@@ -157,6 +182,8 @@ async def create_draft_email(req: DraftEmailRequest, db: Session = Depends(get_d
         recipient_name=req.recipient_name,
     )
     to_address = req.to_address or email_data.get("suggested_to_address", "")
+    if to_address and not _valid_address(to_address):
+        to_address = ""
 
     email_obj = Email(
         job_id=job.id,
@@ -172,7 +199,7 @@ async def create_draft_email(req: DraftEmailRequest, db: Session = Depends(get_d
         db.commit()
     except Exception as e:
         db.rollback()
-        raise HTTPException(503, f"Database busy — try again in a moment: {e}")
+        raise HTTPException(503, "Database busy — try again in a moment") from e
     db.refresh(email_obj)
     return _email_dict(email_obj)
 
@@ -182,8 +209,8 @@ def delete_email(email_id: int, db: Session = Depends(get_db)):
     email = db.query(Email).filter(Email.id == email_id).first()
     if not email:
         raise HTTPException(404, "Email not found")
-    if email.status == "sent":
-        raise HTTPException(400, "Cannot delete sent email")
+    if email.status in ("sent", "sending"):
+        raise HTTPException(400, "Cannot delete a sent email")
     db.delete(email)
     db.commit()
     return {"ok": True}

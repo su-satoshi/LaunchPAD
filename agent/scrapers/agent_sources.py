@@ -15,17 +15,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import os
-import re
-from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
 from agent.tools import firecrawl_client
+from agent.utils import UNTRUSTED_NOTE, parse_llm_json, safe_http_url, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +44,7 @@ GLOBAL_JOB_DOMAINS = [
 
 
 def _make_id(source: str, url: str, title: str = "") -> str:
-    return hashlib.md5(f"{source}:{url}:{title}".encode()).hexdigest()
+    return hashlib.md5(f"{source}:{url}:{title}".encode(), usedforsecurity=False).hexdigest()
 
 
 def _is_au(locations: list[str]) -> bool:
@@ -60,10 +58,7 @@ def _is_au(locations: list[str]) -> bool:
 def _build_queries(titles: list[str], locations: list[str], keywords: list[str]) -> list[str]:
     locs = [l for l in locations if l and l.lower() != "remote"] or ["Australia"]
     kw = " ".join(keywords[:2])
-    queries = []
-    for t in titles:
-        for l in locs:
-            queries.append(f"{t} jobs {l} {kw}".strip())
+    queries = [f"{t} jobs {loc} {kw}".strip() for t in titles for loc in locs]
     if any((l or "").lower() == "remote" for l in locations):
         queries += [f"remote {t} jobs" for t in titles]
     # de-dupe, cap
@@ -124,7 +119,9 @@ async def firecrawl_job_search(
 
     out = []
     for j in jobs:
-        url = j.get("url") or ""
+        url = safe_http_url(j.get("url"))
+        if not url:
+            continue
         out.append({
             "external_id": _make_id("firecrawl", url, j.get("title", "")),
             "title": j.get("title") or "Untitled role",
@@ -137,7 +134,7 @@ async def firecrawl_job_search(
             "remote": bool(j.get("remote")),
             "salary_min": _num(j.get("salary_min")),
             "salary_max": _num(j.get("salary_max")),
-            "posted_at": datetime.utcnow(),
+            "posted_at": utcnow(),
             "is_referral_post": False,
         })
     logger.info(f"Firecrawl: {len(out)} jobs extracted")
@@ -165,19 +162,17 @@ def _extract_jobs_from_pages(pages: list[dict], titles: list[str], locations: li
         "Skip ads, expired roles, and anything that is not a job.\n"
         "Return ONLY a JSON array of objects with keys: title, company, location, description "
         "(2-4 sentences: duties + key requirements), url, job_type, remote (bool), "
-        "salary_min, salary_max (numbers or null). No markdown fences.\n\n" + "\n\n".join(blocks)
+        "salary_min, salary_max (numbers or null). No markdown fences.\n"
+        f"{UNTRUSTED_NOTE}\n\n" + "\n\n".join(blocks)
     )
     resp = client.messages.create(model=MODEL, max_tokens=4096,
                                   messages=[{"role": "user", "content": prompt}])
-    raw = resp.content[0].text.strip()
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
     try:
-        data = json.loads(raw)
-        return [d for d in data if isinstance(d, dict) and d.get("title")] if isinstance(data, list) else []
-    except json.JSONDecodeError:
-        logger.warning(f"Could not parse extracted jobs: {raw[:200]}")
+        data = parse_llm_json(resp.content[0].text)
+    except ValueError:
+        logger.warning("Could not parse extracted jobs")
         return []
+    return [d for d in data if isinstance(d, dict) and d.get("title")] if isinstance(data, list) else []
 
 
 # ── Stagehand browser agent ──────────────────────────────────────────────────
@@ -204,7 +199,7 @@ async def agent_browser_job_search(titles: list[str], locations: list[str]) -> l
     if not companies:
         return []
     # Rotate through the list so each run covers different companies
-    start = (datetime.utcnow().timetuple().tm_yday * AGENT_MAX_SITES) % len(companies)
+    start = (utcnow().timetuple().tm_yday * AGENT_MAX_SITES) % len(companies)
     picked = (companies[start:] + companies[:start])[:AGENT_MAX_SITES]
     loc_hint = ", ".join(locations) or "any location"
     out: list[dict] = []
@@ -229,7 +224,7 @@ async def agent_browser_job_search(titles: list[str], locations: list[str]) -> l
                         logger.warning(f"Agent browse failed for {company}: {e}")
                         continue
                     for l in (page.jobs if page else [])[:15]:
-                        link = l.url if l.url.startswith("http") else url
+                        link = safe_http_url(l.url) or url
                         out.append({
                             "external_id": _make_id("agent_browser", link, f"{company}:{l.title}"),
                             "title": l.title,
@@ -239,7 +234,7 @@ async def agent_browser_job_search(titles: list[str], locations: list[str]) -> l
                             "url": link,
                             "source": "agent_browser",
                             "remote": "remote" in (l.location or "").lower(),
-                            "posted_at": datetime.utcnow(),
+                            "posted_at": utcnow(),
                             "is_referral_post": False,
                         })
     except Exception as e:

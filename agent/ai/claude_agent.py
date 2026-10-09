@@ -2,13 +2,14 @@
 Claude-powered AI agent for job matching, email drafting, and resume analysis.
 Uses claude-sonnet-4-6 with prompt caching for efficiency.
 """
-import json
 import logging
 import os
-import re
 from typing import Optional
-from dotenv import dotenv_values
+
 import anthropic
+from dotenv import dotenv_values
+
+from agent.utils import parse_llm_json, UNTRUSTED_NOTE
 
 # Load environment variables from .env file
 env_vars = dotenv_values()
@@ -51,89 +52,10 @@ Return only valid JSON, no markdown.""",
         ],
     )
     try:
-        text = response.content[0].text.strip()
-        text = re.sub(r"^```(?:json)?\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-        return json.loads(text)
+        return parse_llm_json(response.content[0].text)
     except Exception as e:
         logger.error(f"Resume parse error: {e}")
         return {}
-
-
-def match_job_to_resume(
-    job: dict,
-    resume_text: str,
-    user_skills: list[str],
-    user_preferences: dict,
-) -> dict:
-    """
-    Score a job against the candidate's resume and preferences.
-    Returns: {score, reasons, skills_matched, skills_missing, recommendation}
-    Uses prompt caching on the resume text for efficiency.
-    """
-    pref_summary = json.dumps({
-        "titles": user_preferences.get("job_titles", []),
-        "keywords": user_preferences.get("keywords", []),
-        "exclude": user_preferences.get("exclude_keywords", []),
-        "locations": user_preferences.get("locations", []),
-        "remote_only": user_preferences.get("remote_only", False),
-        "min_salary": user_preferences.get("min_salary"),
-        "job_types": user_preferences.get("job_types", []),
-        "experience_levels": user_preferences.get("experience_levels", []),
-    }, indent=2)
-
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        system=[
-            {
-                "type": "text",
-                "text": "You are an expert job-matching AI that scores job fit with precision.",
-            },
-            {
-                "type": "text",
-                "text": f"CANDIDATE RESUME:\n{resume_text}\n\nCANDIDATE SKILLS: {', '.join(user_skills)}\n\nJOB PREFERENCES:\n{pref_summary}",
-                "cache_control": {"type": "ephemeral"},
-            },
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": f"""Score this job for the candidate. Return JSON only.
-
-JOB:
-Title: {job.get('title')}
-Company: {job.get('company')}
-Location: {job.get('location')}
-Type: {job.get('job_type')}
-Remote: {job.get('remote')}
-Description: {(job.get('description') or '')[:2000]}
-
-Return this exact JSON structure:
-{{
-  "score": 0.0-1.0,
-  "recommendation": "apply" | "skip" | "review",
-  "reasons": ["reason1", "reason2"],
-  "skills_matched": ["skill1", "skill2"],
-  "skills_missing": ["skill1", "skill2"],
-  "fit_summary": "one sentence summary of fit",
-  "red_flags": ["any concerns"],
-  "salary_assessment": "comment on salary if visible"
-}}
-
-Score 0.9+ = excellent match. 0.7-0.9 = good. 0.5-0.7 = moderate. Below 0.5 = poor.
-Penalise heavily for excluded keywords. Penalise if remote-only preference not met.""",
-            }
-        ],
-    )
-    try:
-        text = response.content[0].text.strip()
-        text = re.sub(r"^```(?:json)?\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-        return json.loads(text)
-    except Exception as e:
-        logger.error(f"Job match error: {e}")
-        return {"score": 0.0, "recommendation": "skip", "reasons": [], "skills_matched": [], "skills_missing": []}
 
 
 def batch_match_jobs(
@@ -254,16 +176,16 @@ Return a JSON array of exactly {len(jobs)} objects (index 0 to {len(jobs)-1}), o
   ...
 ]
 
-Return ONLY the JSON array, no markdown, no commentary.""",
+Return ONLY the JSON array, no markdown, no commentary.
+{UNTRUSTED_NOTE}""",
                 }
             ],
         )
-        text = response.content[0].text.strip()
-        text = re.sub(r"^```(?:json)?\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-        results = json.loads(text)
+        results = parse_llm_json(response.content[0].text)
         if not isinstance(results, list):
             raise ValueError("Expected list")
+        empty = {"score": 0.0, "recommendation": "skip", "reasons": [], "skills_matched": [], "skills_missing": []}
+        results = [r if isinstance(r, dict) else dict(empty) for r in results]
         # Pad or trim to match input length
         while len(results) < len(jobs):
             results.append({"score": 0.0, "recommendation": "skip", "reasons": [], "skills_matched": [], "skills_missing": []})
@@ -343,10 +265,7 @@ Return JSON only:
         ],
     )
     try:
-        text = response.content[0].text.strip()
-        text = re.sub(r"^```(?:json)?\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-        return json.loads(text)
+        return parse_llm_json(response.content[0].text)
     except Exception as e:
         logger.error(f"Email draft error: {e}")
         return {
@@ -382,32 +301,6 @@ Return JSON:
         ],
     )
     try:
-        text = response.content[0].text.strip()
-        text = re.sub(r"^```(?:json)?\n?", "", text)
-        text = re.sub(r"\n?```$", "", text)
-        return json.loads(text)
+        return parse_llm_json(response.content[0].text)
     except Exception:
-        return {"likely_email": f"careers@{company.lower().replace(' ', '')}.com", "confidence": "low"}
-
-
-def generate_daily_summary(stats: dict, top_jobs: list[dict]) -> str:
-    """Generate a human-readable daily summary of the agent's activity."""
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=600,
-        system="You are a helpful job search assistant writing a brief daily activity report.",
-        messages=[
-            {
-                "role": "user",
-                "content": f"""Write a concise daily job search summary (3-4 sentences) based on:
-
-Stats: {json.dumps(stats, indent=2)}
-
-Top matched jobs today:
-{json.dumps([{{k: j.get(k) for k in ['title', 'company', 'match_score', 'source']}} for j in top_jobs[:5]], indent=2)}
-
-Mention highlights, good matches, and any actions needed from the user.""",
-            }
-        ],
-    )
-    return response.content[0].text.strip()
+        return {"likely_email": "", "confidence": "low"}

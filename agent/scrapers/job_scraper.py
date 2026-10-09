@@ -7,11 +7,12 @@ and agent sources (self-hosted Firecrawl + Stagehand browser agent) in agent_sou
 import asyncio
 import hashlib
 import httpx
-import re
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 from bs4 import BeautifulSoup
+
+from agent.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def _normalize_location(location: str) -> tuple[str, str]:
 
 
 def _make_id(source: str, url: str) -> str:
-    return hashlib.md5(f"{source}:{url}".encode()).hexdigest()
+    return hashlib.md5(f"{source}:{url}".encode(), usedforsecurity=False).hexdigest()
 
 
 def scrape_jobspy(
@@ -97,7 +98,6 @@ def scrape_jobspy(
     """Use python-jobspy to scrape LinkedIn, Indeed, Glassdoor, ZipRecruiter."""
     try:
         from jobspy import scrape_jobs
-        import pandas as pd
     except ImportError:
         logger.warning("python-jobspy not installed — skipping jobspy sources")
         return []
@@ -192,7 +192,7 @@ async def scrape_seek(titles: list[str], locations: list[str]) -> list[dict]:
                             "url": url,
                             "source": "seek",
                             "remote": "remote" in (loc_el.get_text("").lower() if loc_el else ""),
-                            "posted_at": datetime.utcnow(),
+                            "posted_at": utcnow(),
                             "is_referral_post": False,
                         })
                 except Exception as e:
@@ -227,7 +227,7 @@ async def scrape_web3careers(titles: list[str]) -> list[dict]:
                         "url": url,
                         "source": "web3careers",
                         "remote": True,
-                        "posted_at": datetime.utcnow(),
+                        "posted_at": utcnow(),
                         "is_referral_post": False,
                     })
             except Exception as e:
@@ -261,7 +261,7 @@ async def scrape_prosple(titles: list[str], locations: list[str]) -> list[dict]:
                         "url": url,
                         "source": "prosple",
                         "remote": False,
-                        "posted_at": datetime.utcnow(),
+                        "posted_at": utcnow(),
                         "is_referral_post": False,
                     })
             except Exception as e:
@@ -297,7 +297,7 @@ async def scrape_ambitionbox_referrals(titles: list[str], locations: list[str]) 
                         "url": url,
                         "source": "ambitionbox",
                         "remote": "remote" in text,
-                        "posted_at": datetime.utcnow(),
+                        "posted_at": utcnow(),
                         "is_referral_post": is_referral,
                     })
             except Exception as e:
@@ -474,7 +474,7 @@ def get_top_company_urls(titles: list[str], locations: list[str] | None = None) 
                 "url": url,
                 "source": "top_companies",
                 "remote": True,
-                "posted_at": datetime.utcnow(),
+                "posted_at": utcnow(),
                 "is_referral_post": False,
                 "match_score": None,
             })

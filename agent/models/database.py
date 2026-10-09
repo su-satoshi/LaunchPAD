@@ -2,13 +2,15 @@ from sqlalchemy import (
     create_engine, Column, Integer, String, Text, Float,
     DateTime, Boolean, JSON, ForeignKey, Enum as SAEnum
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-from sqlalchemy.types import TypeDecorator
-from datetime import datetime
+from sqlalchemy import event, text
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import enum
+import logging
 import os
-import json as json_lib
+
+from agent.utils import utcnow
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./jobpilot.db")
 
@@ -22,9 +24,8 @@ if "sqlite" in DATABASE_URL:
         # Default pool size — WAL mode + busy_timeout handle concurrency
     )
     # Enable WAL mode for much better read/write concurrency
-    from sqlalchemy import event
     @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_conn, connection_record):
+    def set_sqlite_pragma(dbapi_conn, _connection_record):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
@@ -47,6 +48,7 @@ class ApplicationStatus(str, enum.Enum):
     interview = "interview"
     offer = "offer"
     skipped = "skipped"
+    expired = "expired"      # removed by quality control: dead link, closed, too old, duplicate
 
 
 class Job(Base):
@@ -65,16 +67,18 @@ class Job(Base):
     salary_currency = Column(String)
     job_type = Column(String)  # full-time, part-time, contract
     remote = Column(Boolean, default=False)
-    match_score = Column(Float)
+    match_score = Column(Float, index=True)
     match_reasons = Column(JSON)
     skills_matched = Column(JSON)
     skills_missing = Column(JSON)
     posted_at = Column(DateTime)
-    found_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(SAEnum(ApplicationStatus), default=ApplicationStatus.found)
+    found_at = Column(DateTime, default=utcnow, index=True)
+    status = Column(SAEnum(ApplicationStatus), default=ApplicationStatus.found, index=True)
     is_referral_post = Column(Boolean, default=False)
     referral_contact = Column(String)
     url_valid = Column(Boolean, nullable=True)  # None=unchecked, True=reachable, False=broken
+    qc_reason = Column(String)                  # why quality control removed it
+    qc_checked_at = Column(DateTime)            # last time QC opened the posting
 
     application = relationship("Application", back_populates="job", uselist=False)
     emails = relationship("Email", back_populates="job")
@@ -91,8 +95,8 @@ class Application(Base):
     applied_at = Column(DateTime)
     follow_up_at = Column(DateTime)
     notes = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     job = relationship("Job", back_populates="application")
 
@@ -107,11 +111,11 @@ class Email(Base):
     to_name = Column(String)
     subject = Column(String, nullable=False)
     body = Column(Text, nullable=False)
-    status = Column(String, default="draft")  # draft, sent, failed
+    status = Column(String, default="draft", index=True)  # draft, sending, sent, failed, archived
     gmail_message_id = Column(String)
     gmail_thread_id = Column(String)
     sent_at = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     error_message = Column(Text)
 
     job = relationship("Job", back_populates="emails")
@@ -136,8 +140,8 @@ class UserProfile(Base):
     work_history = Column(JSON, default=lambda: [])
     visa_status = Column(String)          # e.g. "Australian PR", "Student Visa", "Citizen", "Sponsored"
     work_rights = Column(String)          # e.g. "Full working rights", "Limited hours"
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class JobPreferences(Base):
@@ -159,14 +163,14 @@ class JobPreferences(Base):
     max_applications_per_day = Column(Integer, default=10)
     search_frequency_hours = Column(Integer, default=6)
     active = Column(Boolean, default=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class SearchRun(Base):
     __tablename__ = "search_runs"
 
     id = Column(Integer, primary_key=True, index=True)
-    started_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=utcnow)
     completed_at = Column(DateTime)
     jobs_found = Column(Integer, default=0)
     jobs_matched = Column(Integer, default=0)
@@ -209,7 +213,7 @@ class ReferralProfile(Base):
     subreddits = Column(JSON, default=lambda: ["forhire", "cscareerquestionsOCE", "auscorp"])
     auto_discover = Column(Boolean, default=True)   # find threads during each search run
     max_posts_per_day = Column(Integer, default=5)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class ForumPost(Base):
@@ -228,11 +232,11 @@ class ForumPost(Base):
     relevance = Column(Float)
     title = Column(String)
     body = Column(Text, nullable=False)
-    status = Column(String, default="draft")  # draft, approved, posting, posted, failed, dismissed
+    status = Column(String, default="draft", index=True)  # draft, approved, posting, posted, failed, dismissed, expired
     error_message = Column(Text)
     posted_url = Column(String)
     found_via = Column(String)                # firecrawl, agent_browser
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     posted_at = Column(DateTime)
 
 
@@ -244,5 +248,26 @@ def get_db():
         db.close()
 
 
+# Additive, idempotent migrations for databases created by older versions.
+# create_all() adds new tables but never touches existing ones.
+_MIGRATIONS = [
+    "ALTER TABLE jobs ADD COLUMN url_valid BOOLEAN",
+    "ALTER TABLE jobs ADD COLUMN qc_reason VARCHAR",
+    "ALTER TABLE jobs ADD COLUMN qc_checked_at DATETIME",
+    "CREATE INDEX IF NOT EXISTS ix_jobs_found_at ON jobs (found_at)",
+    "CREATE INDEX IF NOT EXISTS ix_jobs_match_score ON jobs (match_score)",
+    "CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs (status)",
+    "CREATE INDEX IF NOT EXISTS ix_emails_status ON emails (status)",
+    "CREATE INDEX IF NOT EXISTS ix_forum_posts_status ON forum_posts (status)",
+]
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    with engine.connect() as conn:
+        for stmt in _MIGRATIONS:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                conn.rollback()  # column / index already exists

@@ -1,11 +1,13 @@
+import asyncio
 import io
 import logging
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+
+from agent.utils import utcnow
 
 from agent.ai.claude_agent import analyze_resume
 from agent.models.database import JobPreferences, UserProfile, get_db
@@ -13,6 +15,8 @@ from agent.scrapers.job_scraper import _normalize_location
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+MAX_RESUME_BYTES = 10 * 1024 * 1024
 
 
 class ProfileUpdate(BaseModel):
@@ -24,7 +28,7 @@ class ProfileUpdate(BaseModel):
     github_url: Optional[str] = None
     portfolio_url: Optional[str] = None
     skills: Optional[list[str]] = None
-    years_experience: Optional[int] = None
+    years_experience: Optional[int] = Field(None, ge=0, le=60)
     visa_status: Optional[str] = None
     work_rights: Optional[str] = None
 
@@ -40,10 +44,10 @@ class PreferencesUpdate(BaseModel):
     job_types: Optional[list[str]] = None
     experience_levels: Optional[list[str]] = None
     sources: Optional[list[str]] = None
-    min_match_score: Optional[float] = None
-    auto_send_above_score: Optional[float] = None
-    max_applications_per_day: Optional[int] = None
-    search_frequency_hours: Optional[int] = None
+    min_match_score: Optional[float] = Field(None, ge=0, le=1)
+    auto_send_above_score: Optional[float] = Field(None, ge=0, le=1)
+    max_applications_per_day: Optional[int] = Field(None, ge=0, le=100)
+    search_frequency_hours: Optional[int] = Field(None, ge=1, le=168)
     active: Optional[bool] = None
 
 
@@ -63,7 +67,7 @@ def update_profile(data: ProfileUpdate, db: Session = Depends(get_db)):
         db.add(profile)
     for field, val in data.model_dump(exclude_none=True).items():
         setattr(profile, field, val)
-    profile.updated_at = datetime.utcnow()
+    profile.updated_at = utcnow()
     db.commit()
     return _profile_dict(profile)
 
@@ -71,29 +75,38 @@ def update_profile(data: ProfileUpdate, db: Session = Depends(get_db)):
 @router.post("/resume")
 async def upload_resume(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Upload a resume (PDF or TXT). Claude will parse it automatically."""
-    content = await file.read()
+    content = await file.read(MAX_RESUME_BYTES + 1)
+    if len(content) > MAX_RESUME_BYTES:
+        raise HTTPException(413, "Resume is larger than 10 MB")
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".pdf", ".txt", ".md")):
+        raise HTTPException(400, "Upload a PDF or TXT resume")
     text = ""
 
-    if file.filename and file.filename.endswith(".pdf"):
+    if filename.endswith(".pdf"):
         try:
             import pdfplumber
-            with pdfplumber.open(io.BytesIO(content)) as pdf:
-                text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            def _pdf_text() -> str:
+                with pdfplumber.open(io.BytesIO(content)) as pdf:
+                    return "\n".join(page.extract_text() or "" for page in pdf.pages[:20])
+            text = await asyncio.to_thread(_pdf_text)
         except ImportError:
             try:
                 import pypdf
                 reader = pypdf.PdfReader(io.BytesIO(content))
                 text = "\n".join(page.extract_text() or "" for page in reader.pages)
-            except ImportError:
-                raise HTTPException(400, "Install pdfplumber or pypdf to parse PDFs: pip install pdfplumber")
+            except ImportError as e:
+                raise HTTPException(400, "Install pdfplumber or pypdf to parse PDFs: pip install pdfplumber") from e
+        except Exception as e:
+            raise HTTPException(400, "Couldn't read that PDF") from e
     else:
         text = content.decode("utf-8", errors="replace")
 
     if not text.strip():
         raise HTTPException(400, "Could not extract text from file")
 
-    # AI parse
-    parsed = analyze_resume(text)
+    # AI parse (blocking SDK call - keep the server responsive)
+    parsed = await asyncio.to_thread(analyze_resume, text[:60_000])
 
     profile = db.query(UserProfile).first()
     if not profile:
@@ -118,7 +131,7 @@ async def upload_resume(file: UploadFile = File(...), db: Session = Depends(get_
         profile.education = parsed["education"]
     if parsed.get("work_history"):
         profile.work_history = parsed["work_history"]
-    profile.updated_at = datetime.utcnow()
+    profile.updated_at = utcnow()
     db.commit()
 
     return {"ok": True, "parsed": parsed, "filename": file.filename}
@@ -152,8 +165,12 @@ def update_preferences(data: PreferencesUpdate, db: Session = Depends(get_db)):
 
     for field, val in update_data.items():
         setattr(prefs, field, val)
-    prefs.updated_at = datetime.utcnow()
+    prefs.updated_at = utcnow()
     db.commit()
+    if "search_frequency_hours" in update_data:
+        # Apply the new interval now instead of after the next restart
+        from agent.scheduler import reschedule
+        reschedule(prefs.search_frequency_hours)
     return _prefs_dict(prefs)
 
 
@@ -266,30 +283,14 @@ async def get_api_status(db: Session = Depends(get_db)):
 
 @router.get("/gmail/authorize-url")
 def gmail_authorize_url():
-    """Return the OAuth authorization URL for the frontend to open in a new tab."""
-    from pathlib import Path
-    creds_path = Path(os.getenv("GMAIL_CREDENTIALS_PATH", "./gmail_credentials.json"))
-    if not creds_path.exists():
-        raise HTTPException(400, "gmail_credentials.json not found — download from Google Cloud Console")
+    """Return the Google sign-in URL; the token is saved when you finish signing in."""
+    from agent.gmail_service.gmail_service import start_oauth
     try:
-        from google_auth_oauthlib.flow import InstalledAppFlow
-        SCOPES = [
-            "https://www.googleapis.com/auth/gmail.send",
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/gmail.compose",
-        ]
-        flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), SCOPES)
-        # Run server in background thread — user visits URL, token saved
-        import threading
-        token_path = Path(os.getenv("GMAIL_TOKEN_PATH", "./gmail_token.json"))
-        def _run_flow():
-            creds = flow.run_local_server(port=0, open_browser=False)
-            token_path.write_text(creds.to_json())
-            logger.info("Gmail OAuth completed — token saved")
-        t = threading.Thread(target=_run_flow, daemon=True)
-        t.start()
-        # Get the URL the user should visit
-        auth_url, _ = flow.authorization_url(prompt="consent")
-        return {"auth_url": auth_url, "message": "Visit this URL to connect Gmail"}
+        return {"auth_url": start_oauth(), "message": "Sign in with Google in the new tab"}
+    except FileNotFoundError as e:
+        raise HTTPException(400, str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
     except Exception as e:
-        raise HTTPException(500, f"OAuth setup failed: {e}")
+        logger.error(f"Gmail OAuth setup failed: {e}")
+        raise HTTPException(500, "Couldn't start Gmail sign-in - check gmail_credentials.json") from e
