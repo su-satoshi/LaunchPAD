@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { getJob, updateJobStatus, createDraftEmail, autoApplyJob } from "@/lib/api";
-import { statusBadgeStyle, sourceIcon, formatSalary } from "@/lib/utils";
+import { statusBadgeStyle, sourceIcon, formatSalary, safeUrl } from "@/lib/utils";
 import ScoreBadge from "@/components/ScoreBadge";
 import {
   ArrowLeft, ExternalLink, Mail, MapPin, Building2,
@@ -138,7 +138,7 @@ export default function JobDetailPage() {
         <div className="flex flex-wrap gap-3 mt-5 pt-5" style={{ borderTop: "1px solid #1e1e1e" }}>
           {job.url && (
             <a
-              href={job.url}
+              href={safeUrl(job.url)}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition"

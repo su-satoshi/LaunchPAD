@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getJobs, updateJobStatus, triggerSearch, createDraftEmail } from "@/lib/api";
-import { statusBadgeStyle, sourceIcon, formatSalary } from "@/lib/utils";
+import { statusBadgeStyle, sourceIcon, formatSalary, safeUrl } from "@/lib/utils";
 import ScoreBadge from "@/components/ScoreBadge";
 import {
   Search, ExternalLink, RefreshCw, Play,
@@ -26,7 +26,7 @@ const SOURCE_OPTIONS = [
   { id: "google",        label: "Google Jobs",       emoji: "🔷" },
 ];
 const SOURCES = SOURCE_OPTIONS.map((s) => s.id);
-const STATUSES = ["found","matched","draft_ready","email_sent","applied","interview","offer","rejected","skipped"];
+const STATUSES = ["found","matched","draft_ready","email_sent","applied","interview","offer","rejected","skipped","expired"];
 
 // Days after which a job is considered "old/expired"
 const COLD_EMAIL_DAYS = 14;
@@ -167,7 +167,7 @@ function ColdEmailTargetsTab() {
                         </button>
                         {Boolean(job.url) && (
                           <a
-                            href={String(job.url)}
+                            href={safeUrl(job.url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             style={{ color: "#444" }}
@@ -418,6 +418,8 @@ export default function JobsPage() {
                           <select
                             className="text-xs font-medium px-2.5 py-1 rounded-lg border-0 cursor-pointer outline-none"
                             style={statusBadgeStyle(String(job.status))}
+                            title={job.qc_reason ? `Quality check: ${String(job.qc_reason)}` : undefined}
+                            aria-label="Job status"
                             value={String(job.status)}
                             onChange={(e) => statusUpdate.mutate({ id: Number(job.id), s: e.target.value })}
                           >
@@ -429,7 +431,7 @@ export default function JobsPage() {
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
                             {Boolean(job.url) && (
-                              <a href={String(job.url)} target="_blank" rel="noopener noreferrer"
+                              <a href={safeUrl(job.url)} target="_blank" rel="noopener noreferrer"
                                 style={{ color: "#444" }}
                                 onMouseEnter={e => (e.currentTarget.style.color = "#f97316")}
                                 onMouseLeave={e => (e.currentTarget.style.color = "#444")}>

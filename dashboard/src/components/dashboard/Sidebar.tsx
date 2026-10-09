@@ -123,9 +123,9 @@ export default function Sidebar() {
             disabled={isSearching}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 disabled:opacity-60"
             style={{
-              background: isSearching ? "#1a1a1a" : "#f97316",
-              color: isSearching ? "#f97316" : "#fff",
-              border: isSearching ? "1px solid #2a2a2a" : "none",
+              background: isSearching ? "rgba(76,187,23,0.10)" : "#f97316",
+              color: isSearching ? "#6fdc3a" : "#fff",
+              border: isSearching ? "1px solid rgba(76,187,23,0.35)" : "none",
             }}
           >
             {isSearching
@@ -142,27 +142,26 @@ export default function Sidebar() {
           <div className="mx-2.5 mb-2.5 p-3 rounded-xl" style={{ background: "#141414", border: "1px solid #222" }}>
             {(() => {
               const miniPct = progress.jobsFound > 0
-                ? Math.min(100, Math.round((progress.jobsMatched / progress.jobsFound) * 100))
+                ? Math.min(100, Math.round((progress.jobsProcessed / progress.jobsFound) * 100))
                 : 8;
               return (
-                <div className="h-1 rounded-full relative mb-2 overflow-hidden" style={{ background: "rgba(249,115,22,0.18)" }}>
+                <div className="h-1.5 rounded-full relative mb-2" style={{ background: "rgba(76,187,23,0.12)" }}>
                   <div
                     className="absolute inset-y-0 left-0 rounded-full"
-                    style={{ width: `${Math.max(miniPct, 8)}%`, background: "#111", transition: "width 0.7s ease" }}
+                    style={{
+                      width: `${Math.max(miniPct, 8)}%`,
+                      background: "linear-gradient(90deg, #4cbb17, #6fdc3a)",
+                      boxShadow: "0 0 6px rgba(76,187,23,0.8), 0 0 14px rgba(76,187,23,0.45)",
+                      transition: "width 0.7s ease",
+                    }}
                   />
-                  {miniPct > 8 && miniPct < 100 && (
-                    <div
-                      className="absolute top-0 bottom-0 pointer-events-none"
-                      style={{ left: `${miniPct}%`, transform: "translateX(-50%)", width: 1.5, background: "#fff", transition: "left 0.7s ease" }}
-                    />
-                  )}
                 </div>
               );
             })()}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#f97316" }} />
-                <p className="text-[10px] font-bold" style={{ color: "#f97316" }}>Live</p>
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#6fdc3a", boxShadow: "0 0 6px rgba(76,187,23,0.9)" }} />
+                <p className="text-[10px] font-bold" style={{ color: "#6fdc3a" }}>Live</p>
               </div>
               <p className="text-[10px] tabular-nums font-medium" style={{ color: "#555" }}>
                 {progress.jobsFound} · {progress.jobsMatched}

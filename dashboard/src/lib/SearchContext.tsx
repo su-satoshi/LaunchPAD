@@ -35,6 +35,8 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchStatus = useCallback(async () => {
+    // Don't poll from a hidden tab unless a search is running
+    if (typeof document !== "undefined" && document.hidden && !isSearching) return;
     try {
       const res = await fetch("/api/jobs/search/status");
       if (!res.ok) return;

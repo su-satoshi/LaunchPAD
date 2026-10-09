@@ -1,0 +1,17 @@
+target-version = "py311"
+line-length = 120
+
+[lint]
+select = ["F", "E9", "B", "S", "ASYNC", "UP017"]
+ignore = [
+  "B008",   # FastAPI's Depends()/File() defaults are the intended pattern
+  "S101",   # assert in tests
+  "S110",   # try/except/pass is used deliberately in browser cleanup paths
+  "S311",   # random isn't used for security
+  "S608",
+  "E501",
+  "ASYNC240",
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S", "B"]

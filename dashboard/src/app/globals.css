@@ -131,3 +131,11 @@
   .link-dot-broken { background: #ef4444; box-shadow: 0 0 4px rgba(239,68,68,0.6); }
   .link-dot-unchecked { background: #333; }
 }
+
+/* Search progress: the glowing leading edge breathes while a search runs */
+@keyframes search-edge-pulse {
+  0%, 100% { opacity: 1;    filter: brightness(1); }
+  50%      { opacity: 0.75; filter: brightness(1.25); }
+}
+.search-edge-glow { animation: search-edge-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .search-edge-glow { animation: none; } }

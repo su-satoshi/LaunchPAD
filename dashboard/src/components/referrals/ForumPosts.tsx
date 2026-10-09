@@ -1,4 +1,5 @@
 "use client";
+import { safeUrl } from "@/lib/utils";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
@@ -115,7 +116,7 @@ function PostCard({ post }: { post: Post }) {
       {post.thread_url && (
         <div className="rounded-2xl px-4 py-3" style={{ background: "#151515", border: "1px solid #202020" }}>
           <div className="flex items-start justify-between gap-3">
-            <a href={post.thread_url} target="_blank" rel="noopener noreferrer"
+            <a href={safeUrl(post.thread_url)} target="_blank" rel="noopener noreferrer"
               className="text-sm font-semibold hover:underline flex items-center gap-1.5 min-w-0" style={{ color: "#ddd" }}>
               <span className="truncate">{post.thread_title || post.thread_url}</span>
               <ExternalLink className="w-3.5 h-3.5 shrink-0" style={{ color: "#666" }} />
@@ -174,7 +175,7 @@ function PostCard({ post }: { post: Post }) {
             </button>
           </>
         ) : post.status === "posted" ? (
-          <a href={post.posted_url || post.thread_url || "#"} target="_blank" rel="noopener noreferrer"
+          <a href={safeUrl(post.posted_url) ?? safeUrl(post.thread_url)} target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "#4ade80" }}>
             <CheckCircle2 className="w-3.5 h-3.5" /> View on {meta.label}
           </a>

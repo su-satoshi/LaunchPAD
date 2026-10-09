@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getDashboard, getJobs, getPipelineStats, bulkApplyFromUrl } from "@/lib/api";
-import { sourceIcon, statusBadgeStyle, formatSalary } from "@/lib/utils";
+import { sourceIcon, statusBadgeStyle, formatSalary, safeUrl } from "@/lib/utils";
 import ScoreBadge from "@/components/ScoreBadge";
 import {
   Briefcase, Mail,
@@ -172,18 +172,21 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3">
           {isSearching && (
             <div className="flex items-center gap-2 px-4 py-2 rounded-xl"
-              style={{ background: C.orangeDim, border: `1px solid ${C.orangeBorder}` }}>
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: C.orange }} />
-              <span className="text-xs font-semibold" style={{ color: C.orange }}>
+              style={{ background: "rgba(76,187,23,0.08)", border: "1px solid rgba(76,187,23,0.30)" }}>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#6fdc3a", boxShadow: "0 0 6px rgba(76,187,23,0.9)" }} />
+              <span className="text-xs font-semibold" style={{ color: "#6fdc3a" }}>
                 {progress.jobsFound} found · {progress.jobsMatched} matched
               </span>
             </div>
           )}
           <button
+            type="button"
             onClick={handleSearch}
             disabled={isSearching}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-50"
-            style={{ background: C.orange, color: "#fff" }}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-80"
+            style={isSearching
+              ? { background: "rgba(76,187,23,0.10)", color: "#6fdc3a", border: "1px solid rgba(76,187,23,0.35)" }
+              : { background: C.orange, color: "#fff" }}
           >
             {isSearching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             {isSearching ? "Searching…" : "Run Search"}
@@ -359,7 +362,7 @@ export default function DashboardPage() {
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         {Boolean(job.url) && (
-                          <a href={String(job.url)} target="_blank" rel="noopener noreferrer"
+                          <a href={safeUrl(job.url)} target="_blank" rel="noopener noreferrer"
                             className="transition-colors" style={{ color: C.dim }}
                             onMouseEnter={e => (e.currentTarget.style.color = C.orange)}
                             onMouseLeave={e => (e.currentTarget.style.color = C.dim)}>

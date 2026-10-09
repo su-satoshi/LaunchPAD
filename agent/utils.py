@@ -14,14 +14,14 @@ import ipaddress
 import json
 import re
 import socket
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any, Iterable
 from urllib.parse import urlsplit
 
 
 def utcnow() -> datetime:
     """Naive UTC timestamp (what the SQLite columns store). Replaces deprecated datetime.utcnow()."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 # ── URLs ─────────────────────────────────────────────────────────────────────

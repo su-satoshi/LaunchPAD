@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getJobs, createDraftEmail, sendEmail } from "@/lib/api";
-import { sourceIcon } from "@/lib/utils";
+import { sourceIcon, safeUrl } from "@/lib/utils";
 import ScoreBadge from "@/components/ScoreBadge";
 import {
   Users, Send, X, Building2, MapPin,
@@ -358,7 +358,7 @@ function RequestReferrals() {
                     <ChevronRight className="w-4 h-4" />
                   </Link>
                   {Boolean(job.url) && (
-                    <a href={String(job.url)} target="_blank" rel="noopener noreferrer"
+                    <a href={safeUrl(job.url)} target="_blank" rel="noopener noreferrer"
                       className="w-10 h-10 flex items-center justify-center rounded-xl transition"
                       style={{ border: "1px solid #2a2a2a", color: "#555" }}
                       onMouseEnter={e => { e.currentTarget.style.color = "#f97316"; e.currentTarget.style.borderColor = "rgba(249,115,22,0.40)"; }}

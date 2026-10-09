@@ -48,6 +48,8 @@ def list_emails(
     q = db.query(Email)
     if status:
         q = q.filter(Email.status == status)
+    else:
+        q = q.filter(Email.status != "archived")   # drafts for listings quality control removed
     if email_type:
         q = q.filter(Email.email_type == email_type)
     total = q.count()

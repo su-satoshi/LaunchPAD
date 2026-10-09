@@ -83,3 +83,15 @@ async def test_unreachable_once_is_not_expired(db):
     db.expire_all()
     j = db.query(Job).one()
     assert j.status == ApplicationStatus.matched and j.url_valid is False
+
+
+@pytest.mark.asyncio
+async def test_real_listing_beats_search_link_duplicate(db):
+    _add(db, "link", company="Google", source="top_companies", match_score=0.95)
+    _add(db, "real", company="Google", source="indeed", match_score=0.70)
+    db.commit()
+    await qc.run_quality_control(check_pages=False)
+    db.expire_all()
+    status = {j.external_id: j.status for j in db.query(Job)}
+    assert status["real"] == ApplicationStatus.matched
+    assert status["link"] == ApplicationStatus.expired

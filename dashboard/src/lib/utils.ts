@@ -33,13 +33,20 @@ export function statusBadgeStyle(status: string): React.CSSProperties {
     interview:   { background: "rgba(234,179,8,0.08)",       color: "#facc15", border: "1px solid rgba(234,179,8,0.20)" },
     offer:       { background: "rgba(34,197,94,0.12)",       color: "#86efac", border: "1px solid rgba(34,197,94,0.28)" },
     skipped:     { background: "#141414",                    color: "#444",    border: "1px solid #1e1e1e" },
+    expired:     { background: "#141414",                    color: "#555",    border: "1px dashed #262626" },
   };
   return map[status] || { background: "#1a1a1a", color: "#555", border: "1px solid #2a2a2a" };
 }
 
-// Keep old function name as shim
-export function statusBadge(status: string): string {
-  return ""; // use statusBadgeStyle instead
+/** Only render http(s) links. Scraped data can contain javascript:/data: URLs. */
+export function safeUrl(url: unknown): string | undefined {
+  if (typeof url !== "string") return undefined;
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function sourceIcon(source: string): string {

@@ -16,7 +16,7 @@ export default function SearchStatusBar() {
           <p className="text-xs font-semibold text-orange-400">
             {isSearching ? "Search in Progress" : "Last Search"}
           </p>
-          {isSearching && <RefreshCw className="w-3 h-3 text-orange-400 animate-spin" />}
+          {isSearching && <RefreshCw className="w-3 h-3 animate-spin" style={{ color: "#6fdc3a" }} />}
         </div>
         <div className="space-y-1 text-xs text-orange-300">
           <div>Found: <span className="font-semibold">{progress.jobsFound}</span></div>

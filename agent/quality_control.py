@@ -172,7 +172,10 @@ async def run_quality_control(check_pages: bool = True) -> dict:
                     if keep is None:
                         best_by_key[key] = job
                     else:
-                        loser = job if (job.match_score or 0) <= (keep.match_score or 0) else keep
+                        # A real job ad always beats a company search-page link; then higher score wins
+                        def rank(j: Job) -> tuple:
+                            return (j.source != "top_companies", j.match_score or 0)
+                        loser = job if rank(job) <= rank(keep) else keep
                         winner = keep if loser is job else job
                         _expire(loser, f"Duplicate of the same role on {winner.source or 'another board'}")
                         best_by_key[key] = winner

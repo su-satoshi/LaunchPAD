@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getApplications, updateApplication } from "@/lib/api";
-import { statusBadgeStyle, sourceIcon } from "@/lib/utils";
+import { statusBadgeStyle, sourceIcon, safeUrl } from "@/lib/utils";
 import ScoreBadge from "@/components/ScoreBadge";
 import { formatDistanceToNow, format } from "date-fns";
 import { ExternalLink, Bell, LayoutGrid, List } from "lucide-react";
@@ -116,7 +116,7 @@ export default function ApplicationsPage() {
                           </div>
                           {Boolean(job?.url) && (
                             <a
-                              href={String(job.url)}
+                              href={safeUrl(job.url)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="shrink-0 transition"

@@ -98,3 +98,7 @@ export const updateForumPost = (id: number, data: Record<string, unknown>) =>
   api.patch(`/referrals/posts/${id}`, data).then((r) => r.data);
 export const approveForumPost = (id: number) =>
   api.post(`/referrals/posts/${id}/approve`).then((r) => r.data);
+
+// Automatic post-search quality control
+export const getQcStatus = () => api.get("/jobs/qc/status").then((r) => r.data);
+export const runQc = () => api.post("/jobs/qc/run").then((r) => r.data);

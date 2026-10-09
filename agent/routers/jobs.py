@@ -34,11 +34,15 @@ def list_jobs(
     search: Optional[str] = Query(None, max_length=200),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
+    include_hidden: bool = False,
     db: Session = Depends(get_db),
 ):
     q = db.query(Job)
     if status:
         q = q.filter(Job.status == status)
+    elif not include_hidden:
+        # Hide what quality control / scoring set aside; pick the status in the filter to see them
+        q = q.filter(Job.status.notin_([ApplicationStatus.skipped, ApplicationStatus.expired]))
     if source:
         q = q.filter(Job.source == source)
     if min_score is not None:
