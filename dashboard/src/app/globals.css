@@ -1,0 +1,133 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { cursor: none !important; }
+
+  body {
+    background: #080808;
+    color: #e0e0e0;
+  }
+
+  ::-webkit-scrollbar { width: 3px; height: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+}
+
+@layer utilities {
+  /* ── Core surface tokens ── */
+  .surface-0  { background: #080808; }
+  .surface-1  { background: #0d0d0d; }
+  .surface-2  { background: #111111; }
+  .surface-3  { background: #161616; }
+  .surface-4  { background: #1e1e1e; }
+
+  /* ── Card — replaces glass/mat-card ── */
+  .card {
+    background: #111111;
+    border: 1px solid #1e1e1e;
+  }
+  .card-hover:hover { background: #161616; }
+
+  /* Legacy aliases kept so old code doesn't break */
+  .glass        { background: #111111; border: 1px solid #1e1e1e; }
+  .glass-strong { background: #141414; border: 1px solid #222222; }
+  .glass-orange { background: rgba(249,115,22,0.06); border: 1px solid rgba(249,115,22,0.18); }
+  .glass-cyan   { background: rgba(249,115,22,0.06); border: 1px solid rgba(249,115,22,0.18); }
+  .glass-cyan-accent { background: rgba(249,115,22,0.05); border: 1px solid rgba(249,115,22,0.15); }
+  .mat-card     { background: #111111; border: 1px solid #1e1e1e; }
+  .mat-btn      { transition: background 0.12s ease, transform 0.10s ease; }
+  .mat-btn:hover  { background: #1e1e1e; }
+  .mat-btn:active { transform: translateY(1px); }
+
+  /* ── Orange accent ── */
+  .orange-pill {
+    background: rgba(249,115,22,0.10);
+    border: 1px solid rgba(249,115,22,0.22);
+    color: #f97316;
+  }
+
+  /* ── Input ── */
+  .input-dark {
+    background: #0d0d0d;
+    border: 1px solid #2a2a2a;
+    color: #e0e0e0;
+  }
+  .input-dark:focus {
+    border-color: rgba(249,115,22,0.5);
+    outline: none;
+  }
+  .input-dark::placeholder { color: #444444; }
+
+  /* ── Page fade-in ── */
+  .page-enter {
+    animation: pageEnter 0.25s cubic-bezier(0.16,1,0.3,1) forwards;
+  }
+  @keyframes pageEnter {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Orange shimmer for indeterminate progress ── */
+  .shimmer {
+    background: linear-gradient(90deg,
+      rgba(249,115,22,0.10) 0%,
+      rgba(249,115,22,0.35) 40%,
+      rgba(249,115,22,0.10) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.8s ease-in-out infinite;
+  }
+  @keyframes shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  /* ── Pulse ring ── */
+  @keyframes pulseRing {
+    0%   { transform: scale(1);   opacity: 0.6; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+  .pulse-ring { animation: pulseRing 1.4s ease-out infinite; }
+
+  /* ── Orange gradient text ── */
+  .text-gradient-orange {
+    background: linear-gradient(135deg, #fb923c, #f97316, #ea580c);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ── Tilt card (no-op now, keep for compat) ── */
+  .tilt-card {
+    transform-style: preserve-3d;
+    transition: transform 0.12s ease;
+    will-change: transform;
+  }
+
+  /* ── Orange search input ── */
+  .search-input {
+    background: #0d0d0d;
+    border: 1.5px solid #2a2a2a;
+    color: #e0e0e0;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .search-input::placeholder { color: #444; }
+  .search-input:focus {
+    outline: none;
+    border-color: #f97316;
+    box-shadow: 0 0 0 3px rgba(249,115,22,0.12), 0 0 20px rgba(249,115,22,0.08);
+    animation: searchPulse 2s ease-in-out infinite;
+  }
+  @keyframes searchPulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(249,115,22,0.12), 0 0 20px rgba(249,115,22,0.08); }
+    50%       { box-shadow: 0 0 0 3px rgba(249,115,22,0.20), 0 0 30px rgba(249,115,22,0.14); }
+  }
+
+  /* ── Link validity dot ── */
+  .link-dot-valid  { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.6); }
+  .link-dot-broken { background: #ef4444; box-shadow: 0 0 4px rgba(239,68,68,0.6); }
+  .link-dot-unchecked { background: #333; }
+}

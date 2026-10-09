@@ -1,0 +1,29 @@
+# secrets
+.env
+.env.local
+*.env.txt
+gmail_credentials.json
+gmail_token.json
+google oauth/
+firecrawl.env
+
+# data
+*.db
+*.db-shm
+*.db-wal
+agent/auto_apply/.sessions/
+.browser-data/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# node
+node_modules/
+.next/
+tsconfig.tsbuildinfo
+
+# os
+.DS_Store
